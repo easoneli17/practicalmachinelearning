@@ -1,0 +1,153 @@
+---
+title: "Practical Machine Learning Final Project"
+author: Elizabeth Eason
+date: March 13, 2017
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Predicting Quality of Exercise
+
+###Global Settings
+```{r,cache=TRUE}
+set.seed(3026)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+```
+
+##Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Getting and Cleaning the Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. They have been very generous in allowing their data to be used for this kind of assignment.
+
+```{r,cache=TRUE}
+setwd("C:/Users/Lizzie Eason/Desktop/DS Ind Stud/8_PracticalML")
+training<-read.csv("pml-training.csv")
+testing<-read.csv("pml-testing.csv")
+```
+
+First, we clean the data. The first column is simply a row indicator, so we can remove that column.
+
+```{r,cache=TRUE}
+training<-training[-1]
+```
+
+Now, we write a function to eliminate all variables with too many NA values to be useful in predicting:
+
+```{r,cache=TRUE}
+ridna<-function(data){
+  x<-logical()
+  for(i in 1:ncol(data)) {
+    if(sum(is.na(data[, i]))/nrow(data) >= .5) 
+      x<-c(x,FALSE) else (x<-c(x,TRUE))}
+  x}
+
+training2<-training[which(ridna(training))]
+```
+
+Now, we remove all variables whose variance is too small to be predictive:
+
+```{r,cache=TRUE}
+nzv <- nearZeroVar(training2, saveMetrics=TRUE)
+training3 <- training2[,nzv$nzv==FALSE]
+```
+
+Next, we investigate the highly correlated variables in the data
+
+```{r,cache=TRUE}
+t3<-apply(training3[,6:57], 2, function(x) as.numeric(x))
+M<-abs(cor(t3))
+diagM<-0
+which(M>.8,arr.ind=T)
+```
+
+Since there are many, we will use method="pca" in all of our models to effectively deal with the highly correlated variables.
+
+###Now that we have cleaned the data, we split it into training and validation sets. Note that we do not call the validation set a test set because the test set is a separate data set containing 20 observations for which classe will be predicted.
+```{r,cache=TRUE}
+trainind <- createDataPartition(training3$classe, p=0.6, list=FALSE)
+train<-training3[trainind,]
+valid<-training3[-trainind,]
+```
+
+## Generalized Boosted Model
+
+```{r,cache=TRUE}
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 1)
+
+gbm_mod <- train(classe ~ ., data=train, method = "gbm",
+                 preProcess="pca",
+                 trControl = fitControl,
+                 verbose = FALSE)
+
+finmod1 <- gbm_mod$finalModel
+```
+
+Now we can evaluate the accuracy of the model
+
+```{r,cache=TRUE}
+pred_gbm <- predict(gbm_mod, newdata=valid)
+acct <- confusionMatrix(pred_gbm, valid$classe)
+acct
+```
+
+An accuracy of 91.65% is pretty good. The following plot shows the accuracy:
+
+```{r,cache=TRUE}
+plot(gbm_mod, ylim=c(0.6, 1))
+```
+
+##Decision Tree Model
+
+We now build a model using a decision tree
+
+```{r,cache=TRUE}
+dt_mod <- rpart(classe~., data=train, method="class")
+pred_dt <- predict(dt_mod, valid, type = "class")
+cm_dt<- confusionMatrix(pred_dt, valid$classe)
+cm_dt
+```
+The accuracy of this model is slightly lower at 88.16%.
+
+```{r,cache=TRUE}
+fancyRpartPlot(dt_mod)
+```
+
+##Random Forest Model
+
+We now build a model using a random forest
+
+```{r,cache=TRUE}
+rf_mod<-train(classe~.,data=train,method="rf",preProcess="pca",trControl=trainControl(method="cv"),number=3)
+pred_rf <- predict(rf_mod, valid)
+cm_rf <- confusionMatrix(pred_rf, valid$classe)
+cm_rf
+```
+
+This has an accuracy of 98.29%! This is definitely the model we will use to predict the 20 observations in the test set.
+
+##Predicting classe for the Test Set
+
+We now obtain predictions for the quiz.
+```{r,cache=TRUE}
+test_predictions <- predict(rf_mod, testing)
+test_predictions
+```
